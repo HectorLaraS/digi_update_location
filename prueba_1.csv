@@ -1,0 +1,6 @@
+ip,new_location
+172.16.2.10,cprs:w999999cell9
+10.1.1.1,cprs:w888888cell2
+999.1.1.1,cprs:badcell
+172.16.2.10,cprs:duplicate
+,empty_ip
