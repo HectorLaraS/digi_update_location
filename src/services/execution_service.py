@@ -81,14 +81,13 @@ class ExecutionService:
             return
 
         if not reboot_enabled:
-            self._audit.update_router_execution_result(
+            self._finalize_router_with_location_verification(
                 execution_id=execution_id,
-                ip_address=router.ip,
-                connection_status_after="connected",
-                system_status_after="updated_no_reboot",
-                update_result="success",
+                router=router,
                 reboot_result="skipped",
-                notes="Location updated without reboot.",
+                success_message="Location updated without reboot.",
+                digi_user=digi_user,
+                digi_pass=digi_pass,
             )
             return
 
@@ -122,17 +121,7 @@ class ExecutionService:
             max_attempts=self._max_attempts,
         )
 
-        if success:
-            self._audit.update_router_execution_result(
-                execution_id=execution_id,
-                ip_address=router.ip,
-                connection_status_after="connected",
-                system_status_after="done",
-                update_result="success",
-                reboot_result="success",
-                notes="Reboot completed successfully.",
-            )
-        else:
+        if not success:
             self._audit.update_router_execution_result(
                 execution_id=execution_id,
                 ip_address=router.ip,
@@ -142,6 +131,68 @@ class ExecutionService:
                 reboot_result="timeout",
                 notes="Router did not come back online in time.",
             )
+            return
+
+        self._finalize_router_with_location_verification(
+            execution_id=execution_id,
+            router=router,
+            reboot_result="success",
+            success_message="Reboot completed successfully.",
+            digi_user=digi_user,
+            digi_pass=digi_pass,
+        )
+
+    def _finalize_router_with_location_verification(
+        self,
+        execution_id: str,
+        router: RouterResult,
+        reboot_result: str,
+        success_message: str,
+        digi_user: str | None,
+        digi_pass: str | None,
+    ) -> None:
+        device = self._digi.get_device_by_id(
+            device_id=router.device_id,
+            digi_user=digi_user,
+            digi_pass=digi_pass,
+        )
+
+        if device is None:
+            self._audit.update_router_execution_result(
+                execution_id=execution_id,
+                ip_address=router.ip,
+                connection_status_after="disconnected",
+                system_status_after="verification_failed",
+                update_result="success",
+                reboot_result=reboot_result,
+                notes="Router could not be retrieved from Digi for location verification.",
+            )
+            return
+
+        current_location = device.location or ""
+        expected_location = router.new_location or ""
+
+        if current_location == expected_location:
+            final_status = "updated_no_reboot" if reboot_result == "skipped" else "done"
+            notes = (
+                f"{success_message} Verified location: {current_location or '-'}."
+            )
+        else:
+            final_status = "verification_failed"
+            notes = (
+                f"Location verification failed. Expected: {expected_location or '-'} | "
+                f"Current Digi location: {current_location or '-'}."
+            )
+
+        self._audit.update_router_execution_result(
+            execution_id=execution_id,
+            ip_address=router.ip,
+            connection_status_after=device.connection_status,
+            system_status_after=final_status,
+            update_result="success",
+            reboot_result=reboot_result,
+            notes=notes,
+        )
 
     def _is_router_connected(
         self,

@@ -82,6 +82,37 @@ class RouterRepository:
             )
             connection.commit()
 
+    def refresh_router_status(
+        self,
+        execution_id: str,
+        ip_address: str,
+        connection_status_after: str | None,
+        system_status_after: str | None,
+        notes: str | None,
+    ) -> None:
+        query = """
+        UPDATE dbo.affected_routers
+        SET
+            connection_status_after = ?,
+            system_status_after = ?,
+            notes = ?,
+            updated_at = SYSDATETIME()
+        WHERE execution_id = ?
+          AND ip_address = ?;
+        """
+
+        with self._db_manager.get_connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                query,
+                connection_status_after,
+                system_status_after,
+                notes,
+                execution_id,
+                ip_address,
+            )
+            connection.commit()
+
     def get_routers_by_execution_id(self, execution_id: str) -> list[dict[str, Any]]:
         query = """
         SELECT

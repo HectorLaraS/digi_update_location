@@ -57,6 +57,12 @@ function renderSummary(execution) {
   executionStatus.textContent = execution.execution_status ?? "-";
 }
 
+function renderStatusBadge(value, kind = "status") {
+  const rawValue = value ?? "-";
+  const safeClassValue = String(rawValue).toLowerCase().replaceAll("_", "-");
+  return `<span class="table-badge ${kind}-badge ${kind}-${safeClassValue}">${rawValue}</span>`;
+}
+
 function renderRouters(routers) {
   tableBody.innerHTML = "";
 
@@ -86,11 +92,11 @@ function renderRouters(routers) {
       <td>${router.old_location ?? "-"}</td>
       <td>${router.new_location ?? "-"}</td>
       <td>${router.device_type ?? "-"}</td>
-      <td>${router.connection_status_before ?? "-"}</td>
-      <td>${router.system_status_before ?? "-"}</td>
-      <td>${router.system_status_after ?? "-"}</td>
-      <td>${router.update_result ?? "-"}</td>
-      <td>${router.reboot_result ?? "-"}</td>
+      <td>${renderStatusBadge(router.connection_status_before, "connection")}</td>
+      <td>${renderStatusBadge(router.system_status_before, "status")}</td>
+      <td>${renderStatusBadge(router.system_status_after, "status")}</td>
+      <td>${renderStatusBadge(router.update_result, "result")}</td>
+      <td>${renderStatusBadge(router.reboot_result, "result")}</td>
       <td>${router.notes ?? "-"}</td>
     `;
     tableBody.appendChild(row);
@@ -110,6 +116,14 @@ async function loadExecution(executionId) {
   refreshBtn.disabled = false;
 }
 
+function validateCredentialPair(digiUser, digiPassword) {
+  if ((digiUser && !digiPassword) || (!digiUser && digiPassword)) {
+    setMessage("Please provide both Digi user/email and Digi password, or leave both empty.");
+    return false;
+  }
+  return true;
+}
+
 validateBtn.addEventListener("click", async () => {
   const file = csvFileInput.files[0];
   const executedBy = executedByInput.value.trim();
@@ -122,8 +136,7 @@ validateBtn.addEventListener("click", async () => {
     return;
   }
 
-  if ((digiUser && !digiPassword) || (!digiUser && digiPassword)) {
-    setMessage("Please provide both Digi user/email and Digi password, or leave both empty.");
+  if (!validateCredentialPair(digiUser, digiPassword)) {
     return;
   }
 
@@ -184,8 +197,7 @@ executeBtn.addEventListener("click", async () => {
   const digiUser = digiUserInput.value.trim();
   const digiPassword = digiPasswordInput.value;
 
-  if ((digiUser && !digiPassword) || (!digiUser && digiPassword)) {
-    setMessage("Please provide both Digi user/email and Digi password, or leave both empty.");
+  if (!validateCredentialPair(digiUser, digiPassword)) {
     return;
   }
 
@@ -230,13 +242,39 @@ refreshBtn.addEventListener("click", async () => {
     return;
   }
 
+  const digiUser = digiUserInput.value.trim();
+  const digiPassword = digiPasswordInput.value;
+
+  if (!validateCredentialPair(digiUser, digiPassword)) {
+    return;
+  }
+
   try {
     setStatus("Refreshing...");
     currentPhaseLabel.textContent = "Refresh Status";
 
-    await loadExecution(currentExecutionId);
+    const response = await fetch(`/execution/${currentExecutionId}/refresh`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        digi_user: digiUser,
+        digi_pass: digiPassword,
+      }),
+    });
 
-    setMessage("Execution detail refreshed from database.");
+    const data = await response.json();
+
+    if (!response.ok) {
+      setMessage(data.error || "Refresh failed.");
+      setStatus("Error");
+      return;
+    }
+
+    renderSummary(data.execution);
+    renderRouters(data.routers);
+    setMessage("Execution detail refreshed from Digi.");
     setStatus("Refreshed");
   } catch (error) {
     setMessage(`Unexpected error during refresh: ${error}`);

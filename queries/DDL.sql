@@ -149,3 +149,48 @@ GO
 CREATE INDEX IX_audit_log_started_at
 ON dbo.audit_log(started_at);
 GO
+
+----------------------------------
+
+USE DigiLocationManager;
+GO
+
+ALTER TABLE dbo.affected_routers
+DROP CONSTRAINT CK_affected_routers_system_status_before;
+GO
+
+ALTER TABLE dbo.affected_routers
+ADD CONSTRAINT CK_affected_routers_system_status_before
+CHECK (system_status_before IS NULL OR system_status_before IN (
+    'ready',
+    'not_found',
+    'disconnected',
+    'pending_reboot',
+    'updated_no_reboot',
+    'rebooting',
+    'reboot_timeout',
+    'update_failed',
+    'verification_failed',
+    'done'
+));
+GO
+
+ALTER TABLE dbo.affected_routers
+DROP CONSTRAINT CK_affected_routers_system_status_after;
+GO
+
+ALTER TABLE dbo.affected_routers
+ADD CONSTRAINT CK_affected_routers_system_status_after
+CHECK (system_status_after IS NULL OR system_status_after IN (
+    'ready',
+    'not_found',
+    'disconnected',
+    'pending_reboot',
+    'updated_no_reboot',
+    'rebooting',
+    'reboot_timeout',
+    'update_failed',
+    'verification_failed',
+    'done'
+));
+GO

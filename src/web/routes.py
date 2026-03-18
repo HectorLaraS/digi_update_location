@@ -11,6 +11,7 @@ from src.services.audit_service import AuditService
 from src.services.csv_service import CsvService
 from src.services.digi_service import DigiService
 from src.services.execution_service import ExecutionService
+from src.services.refresh_service import RefreshService
 from src.services.validation_service import ValidationService
 
 
@@ -40,6 +41,7 @@ def register_routes(
     validation_service: ValidationService,
     digi_service: DigiService,
     execution_service: ExecutionService,
+    refresh_service: RefreshService,
 ) -> None:
     @app.get("/")
     def index() -> str:
@@ -199,6 +201,30 @@ def register_routes(
                     "status": "completed",
                     "execution": _serialize_record(updated_detail["execution"]),
                     "routers": _serialize_records(updated_detail["routers"]),
+                }
+            ),
+            200,
+        )
+
+    @app.post("/execution/<execution_id>/refresh")
+    def refresh_execution(execution_id: str) -> tuple:
+        data = request.get_json(silent=True) or {}
+
+        digi_user = (data.get("digi_user") or "").strip() or None
+        digi_pass = (data.get("digi_pass") or "").strip() or None
+
+        refreshed_detail = refresh_service.refresh_execution(
+            execution_id=execution_id,
+            digi_user=digi_user,
+            digi_pass=digi_pass,
+        )
+
+        return (
+            jsonify(
+                {
+                    "status": "refreshed",
+                    "execution": _serialize_record(refreshed_detail["execution"]),
+                    "routers": _serialize_records(refreshed_detail["routers"]),
                 }
             ),
             200,
