@@ -1,4 +1,5 @@
 let currentExecutionId = null;
+let pollingIntervalId = null;
 
 const digiUserInput = document.getElementById("digiUser");
 const digiPasswordInput = document.getElementById("digiPassword");
@@ -42,6 +43,22 @@ function setPausedControls(isPaused) {
   executeBtn.disabled = isPaused || !currentExecutionId;
 }
 
+function setRunningControls(isRunning) {
+  validateBtn.disabled = isRunning;
+  executeBtn.disabled = isRunning || !currentExecutionId;
+  continueBtn.disabled = true;
+  stopBtn.disabled = !isRunning;
+  refreshBtn.disabled = false;
+}
+
+function setIdleControls() {
+  validateBtn.disabled = false;
+  executeBtn.disabled = !currentExecutionId;
+  continueBtn.disabled = true;
+  stopBtn.disabled = true;
+  refreshBtn.disabled = !currentExecutionId;
+}
+
 function renderSummary(execution) {
   if (!execution) {
     totalRows.textContent = "0";
@@ -65,7 +82,9 @@ function renderSummary(execution) {
   failedCount.textContent = execution.failed_count ?? 0;
   executionStatus.textContent = execution.execution_status ?? "-";
 
-  setPausedControls(execution.execution_status === "paused");
+  if (execution.execution_status === "paused") {
+    setPausedControls(true);
+  }
 }
 
 function renderStatusBadge(value, kind = "status") {
@@ -124,7 +143,6 @@ async function loadExecution(executionId) {
   currentExecutionId = data.execution?.execution_id || executionId;
   executionIdLabel.textContent = currentExecutionId || "-";
   refreshBtn.disabled = false;
-  executeBtn.disabled = !currentExecutionId || data.execution?.execution_status === "paused";
 }
 
 function validateCredentialPair(digiUser, digiPassword) {
@@ -133,6 +151,94 @@ function validateCredentialPair(digiUser, digiPassword) {
     return false;
   }
   return true;
+}
+
+async function pollExecutionStatus() {
+  if (!currentExecutionId) {
+    stopPolling();
+    return;
+  }
+
+  try {
+    const [jobResponse, executionResponse] = await Promise.all([
+      fetch(`/execution/${currentExecutionId}/job-status`),
+      fetch(`/execution/${currentExecutionId}`),
+    ]);
+
+    const executionData = await executionResponse.json();
+    renderSummary(executionData.execution);
+    renderRouters(executionData.routers);
+
+    if (!jobResponse.ok) {
+      return;
+    }
+
+    const jobData = await jobResponse.json();
+
+    if (jobData.status === "running") {
+      setStatus("Running");
+      currentPhaseLabel.textContent = "Execution Running";
+      setRunningControls(true);
+      if (jobData.message) {
+        setMessage(jobData.message);
+      }
+      return;
+    }
+
+    if (jobData.status === "paused") {
+      setStatus("Paused");
+      currentPhaseLabel.textContent = "Paused";
+      setPausedControls(true);
+      setMessage(
+        jobData.message ||
+          `Execution paused. Router ${jobData.paused_router_ip || "-"} did not come back online.`
+      );
+      stopPolling();
+      return;
+    }
+
+    if (jobData.status === "completed") {
+      setStatus("Completed");
+      currentPhaseLabel.textContent = "Execution Completed";
+      setMessage(jobData.message || "Execution completed successfully.");
+      setIdleControls();
+      stopPolling();
+      return;
+    }
+
+    if (jobData.status === "failed") {
+      setStatus("Failed");
+      currentPhaseLabel.textContent = "Execution Failed";
+      setMessage(jobData.message || "Execution failed.");
+      setIdleControls();
+      stopPolling();
+      return;
+    }
+
+    if (jobData.status === "cancelled" || jobData.status === "cancel_requested") {
+      setStatus("Cancelled");
+      currentPhaseLabel.textContent = "Cancelled";
+      setMessage(jobData.message || "Execution was cancelled.");
+      setIdleControls();
+      stopPolling();
+    }
+  } catch (error) {
+    setMessage(`Unexpected polling error: ${error}`);
+    setStatus("Error");
+    stopPolling();
+  }
+}
+
+function startPolling() {
+  stopPolling();
+  pollingIntervalId = window.setInterval(pollExecutionStatus, 3000);
+}
+
+function stopPolling() {
+  if (pollingIntervalId !== null) {
+    window.clearInterval(pollingIntervalId);
+    pollingIntervalId = null;
+  }
 }
 
 validateBtn.addEventListener("click", async () => {
@@ -162,6 +268,7 @@ validateBtn.addEventListener("click", async () => {
     setStatus("Validating...");
     currentPhaseLabel.textContent = "Preparation / Validation";
     setPausedControls(false);
+    stopPolling();
 
     const response = await fetch("/validate", {
       method: "POST",
@@ -194,6 +301,7 @@ validateBtn.addEventListener("click", async () => {
 
     setMessage(messages.join("\n"));
     setStatus("Validated");
+    setIdleControls();
   } catch (error) {
     setMessage(`Unexpected error during validation: ${error}`);
     setStatus("Error");
@@ -214,9 +322,9 @@ executeBtn.addEventListener("click", async () => {
   }
 
   try {
-    setStatus("Executing...");
-    currentPhaseLabel.textContent = "Execution";
-    setPausedControls(false);
+    setStatus("Starting...");
+    currentPhaseLabel.textContent = "Execution Starting";
+    setRunningControls(true);
 
     const response = await fetch("/execute", {
       method: "POST",
@@ -234,31 +342,22 @@ executeBtn.addEventListener("click", async () => {
     const data = await response.json();
 
     if (!response.ok) {
-      setMessage(data.error || "Execution failed.");
+      setMessage(data.error || "Execution failed to start.");
       setStatus("Error");
+      setIdleControls();
       return;
     }
 
     renderSummary(data.execution);
     renderRouters(data.routers);
-
-    if (data.status === "paused") {
-      setMessage(
-        data.message ||
-          `Execution paused. Router ${data.paused_router_ip || "-"} did not come back online.`
-      );
-      setStatus("Paused");
-      currentPhaseLabel.textContent = "Paused";
-      setPausedControls(true);
-      return;
-    }
-
-    setMessage("Execution completed.");
-    setStatus("Completed");
-    currentPhaseLabel.textContent = "Execution Completed";
+    setMessage(data.message || "Execution started in background.");
+    setStatus("Running");
+    currentPhaseLabel.textContent = "Execution Running";
+    startPolling();
   } catch (error) {
-    setMessage(`Unexpected error during execution: ${error}`);
+    setMessage(`Unexpected error during execution start: ${error}`);
     setStatus("Error");
+    setIdleControls();
   }
 });
 
@@ -278,6 +377,7 @@ continueBtn.addEventListener("click", async () => {
   try {
     setStatus("Continuing...");
     currentPhaseLabel.textContent = "Continue Execution";
+    setRunningControls(true);
 
     const response = await fetch(`/execution/${currentExecutionId}/continue`, {
       method: "POST",
@@ -296,30 +396,20 @@ continueBtn.addEventListener("click", async () => {
     if (!response.ok) {
       setMessage(data.error || "Continue execution failed.");
       setStatus("Error");
+      setPausedControls(true);
       return;
     }
 
     renderSummary(data.execution);
     renderRouters(data.routers);
-
-    if (data.status === "paused") {
-      setMessage(
-        data.message ||
-          `Execution paused again. Router ${data.paused_router_ip || "-"} did not come back online.`
-      );
-      setStatus("Paused");
-      currentPhaseLabel.textContent = "Paused";
-      setPausedControls(true);
-      return;
-    }
-
-    setMessage("Execution continued and completed.");
-    setStatus("Completed");
-    currentPhaseLabel.textContent = "Execution Completed";
-    setPausedControls(false);
+    setMessage(data.message || "Execution continue started in background.");
+    setStatus("Running");
+    currentPhaseLabel.textContent = "Execution Running";
+    startPolling();
   } catch (error) {
     setMessage(`Unexpected error during continue execution: ${error}`);
     setStatus("Error");
+    setPausedControls(true);
   }
 });
 
@@ -353,7 +443,8 @@ stopBtn.addEventListener("click", async () => {
     setMessage(data.message || "Execution was cancelled.");
     setStatus("Cancelled");
     currentPhaseLabel.textContent = "Cancelled";
-    setPausedControls(false);
+    setIdleControls();
+    stopPolling();
   } catch (error) {
     setMessage(`Unexpected error during stop execution: ${error}`);
     setStatus("Error");

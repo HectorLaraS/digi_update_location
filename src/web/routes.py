@@ -10,6 +10,7 @@ from src.domain.router_result import RouterResult
 from src.services.audit_service import AuditService
 from src.services.csv_service import CsvService
 from src.services.digi_service import DigiService
+from src.services.execution_manager import ExecutionManager
 from src.services.execution_service import ExecutionService
 from src.services.refresh_service import RefreshService
 from src.services.validation_service import ValidationService
@@ -63,6 +64,7 @@ def register_routes(
     validation_service: ValidationService,
     digi_service: DigiService,
     execution_service: ExecutionService,
+    execution_manager: ExecutionManager,
     refresh_service: RefreshService,
 ) -> None:
     @app.get("/")
@@ -72,6 +74,26 @@ def register_routes(
     @app.get("/health")
     def health() -> tuple:
         return jsonify({"status": "ok"}), 200
+
+    @app.get("/execution/<execution_id>/job-status")
+    def get_job_status(execution_id: str) -> tuple:
+        job = execution_manager.get_job_state(execution_id)
+        if job is None:
+            return jsonify({"status": "not_found"}), 404
+
+        return (
+            jsonify(
+                {
+                    "execution_id": job.execution_id,
+                    "status": job.status,
+                    "message": job.message,
+                    "paused_router_ip": job.paused_router_ip,
+                    "is_running": job.is_running,
+                    "is_cancel_requested": job.is_cancel_requested,
+                }
+            ),
+            200,
+        )
 
     @app.post("/validate")
     def validate_csv() -> tuple:
@@ -187,10 +209,13 @@ def register_routes(
             return jsonify({"error": "execution_id is required."}), 400
 
         detail = audit_service.get_execution_detail(execution_id)
+        if not detail["execution"]:
+            return jsonify({"error": "Execution not found."}), 404
+
         routers_data = detail["routers"]
         router_results = _build_router_results(routers_data)
 
-        outcome = execution_service.execute(
+        job = execution_manager.start_execution(
             execution_id=execution_id,
             routers=router_results,
             reboot_enabled=reboot_enabled,
@@ -203,14 +228,15 @@ def register_routes(
         return (
             jsonify(
                 {
-                    "status": outcome.status,
-                    "message": outcome.message,
-                    "paused_router_ip": outcome.paused_router_ip,
+                    "status": job.status,
+                    "message": job.message,
+                    "paused_router_ip": job.paused_router_ip,
+                    "is_running": job.is_running,
                     "execution": _serialize_record(updated_detail["execution"]),
                     "routers": _serialize_records(updated_detail["routers"]),
                 }
             ),
-            200,
+            202,
         )
 
     @app.post("/execution/<execution_id>/continue")
@@ -235,7 +261,7 @@ def register_routes(
 
         router_results = _build_router_results(routers_to_continue)
 
-        outcome = execution_service.execute(
+        job = execution_manager.continue_execution(
             execution_id=execution_id,
             routers=router_results,
             reboot_enabled=reboot_enabled,
@@ -248,14 +274,15 @@ def register_routes(
         return (
             jsonify(
                 {
-                    "status": outcome.status,
-                    "message": outcome.message,
-                    "paused_router_ip": outcome.paused_router_ip,
+                    "status": job.status,
+                    "message": job.message,
+                    "paused_router_ip": job.paused_router_ip,
+                    "is_running": job.is_running,
                     "execution": _serialize_record(updated_detail["execution"]),
                     "routers": _serialize_records(updated_detail["routers"]),
                 }
             ),
-            200,
+            202,
         )
 
     @app.post("/execution/<execution_id>/stop")
@@ -264,6 +291,7 @@ def register_routes(
         if not detail["execution"]:
             return jsonify({"error": "Execution not found."}), 404
 
+        execution_manager.request_cancel(execution_id)
         audit_service.mark_execution_cancelled(execution_id)
 
         updated_detail = audit_service.get_execution_detail(execution_id)
@@ -272,7 +300,7 @@ def register_routes(
             jsonify(
                 {
                     "status": "cancelled",
-                    "message": "Execution was cancelled by the user.",
+                    "message": "Execution cancellation requested by the user.",
                     "execution": _serialize_record(updated_detail["execution"]),
                     "routers": _serialize_records(updated_detail["routers"]),
                 }

@@ -12,6 +12,7 @@ from src.repositories.router_repository import RouterRepository
 from src.services.audit_service import AuditService
 from src.services.csv_service import CsvService
 from src.services.digi_service import DigiService
+from src.services.execution_manager import ExecutionManager
 from src.services.execution_service import ExecutionService
 from src.services.refresh_service import RefreshService
 from src.services.validation_service import ValidationService
@@ -57,6 +58,10 @@ def create_app() -> Flask:
         reboot_delay_between_routers_seconds=settings.reboot_delay_between_routers_seconds,
     )
 
+    execution_manager = ExecutionManager(
+        execution_service=execution_service,
+    )
+
     refresh_service = RefreshService(
         digi_service=digi_service,
         audit_service=audit_service,
@@ -69,6 +74,7 @@ def create_app() -> Flask:
         validation_service=validation_service,
         digi_service=digi_service,
         execution_service=execution_service,
+        execution_manager=execution_manager,
         refresh_service=refresh_service,
     )
 
