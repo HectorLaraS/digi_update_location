@@ -90,6 +90,13 @@ def register_routes(
                     "paused_router_ip": job.paused_router_ip,
                     "is_running": job.is_running,
                     "is_cancel_requested": job.is_cancel_requested,
+                    "current_phase": job.current_phase,
+                    "current_router_ip": job.current_router_ip,
+                    "current_router_name": job.current_router_name,
+                    "processed_count": job.processed_count,
+                    "total_count": job.total_count,
+                    "countdown_seconds": job.countdown_seconds,
+                    "countdown_label": job.countdown_label,
                 }
             ),
             200,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Callable
 
 from src.domain.router_result import RouterResult
 from src.services.audit_service import AuditService
@@ -42,6 +43,7 @@ class ExecutionService:
         reboot_enabled: bool | None = None,
         digi_user: str | None = None,
         digi_pass: str | None = None,
+        progress_callback: Callable[..., None] | None = None,
     ) -> ExecutionOutcome:
         if reboot_enabled is None:
             reboot_enabled = self._reboot_enabled_default
@@ -49,24 +51,89 @@ class ExecutionService:
         self._audit.mark_execution_running(execution_id)
 
         ready_routers = [router for router in routers if router.system_status == "ready"]
+        total_ready = len(ready_routers)
+
+        if progress_callback:
+            progress_callback(
+                current_phase="Execution started",
+                processed_count=0,
+                message="Execution started.",
+            )
 
         for index, router in enumerate(ready_routers, start=1):
+            if progress_callback:
+                progress_callback(
+                    current_phase="Processing router",
+                    current_router_ip=router.ip,
+                    current_router_name=router.device_name,
+                    processed_count=index - 1,
+                    countdown_seconds=None,
+                    countdown_label=None,
+                    message=f"Processing router {index} of {total_ready}.",
+                )
+
             outcome = self._process_single_router(
                 execution_id=execution_id,
                 router=router,
                 reboot_enabled=reboot_enabled,
                 digi_user=digi_user,
                 digi_pass=digi_pass,
+                processed_count=index - 1,
+                progress_callback=progress_callback,
             )
 
             if outcome is not None and outcome.status == "paused":
                 self._audit.mark_execution_paused(execution_id)
                 return outcome
 
+            if progress_callback:
+                progress_callback(
+                    current_phase="Router completed",
+                    current_router_ip=router.ip,
+                    current_router_name=router.device_name,
+                    processed_count=index,
+                    countdown_seconds=None,
+                    countdown_label=None,
+                    message=f"Router {index} of {total_ready} completed.",
+                )
+
             if reboot_enabled and index < len(ready_routers):
-                sleep_seconds(self._delay_between)
+                if progress_callback:
+                    progress_callback(
+                        current_phase="Delay between routers",
+                        current_router_ip=router.ip,
+                        current_router_name=router.device_name,
+                        processed_count=index,
+                        countdown_seconds=self._delay_between,
+                        countdown_label="Next router in",
+                        message="Waiting before processing the next router.",
+                    )
+
+                for remaining in range(self._delay_between, 0, -1):
+                    if progress_callback:
+                        progress_callback(
+                            countdown_seconds=remaining,
+                            countdown_label="Next router in",
+                        )
+                    sleep_seconds(1)
+
+                if progress_callback:
+                    progress_callback(
+                        countdown_seconds=None,
+                        countdown_label=None,
+                    )
 
         self._audit.finalize_execution(execution_id)
+
+        if progress_callback:
+            progress_callback(
+                current_phase="Execution completed",
+                processed_count=total_ready,
+                countdown_seconds=None,
+                countdown_label=None,
+                message="Execution completed successfully.",
+            )
+
         return ExecutionOutcome(
             status="completed",
             message="Execution completed successfully.",
@@ -79,7 +146,18 @@ class ExecutionService:
         reboot_enabled: bool,
         digi_user: str | None,
         digi_pass: str | None,
+        processed_count: int,
+        progress_callback: Callable[..., None] | None = None,
     ) -> ExecutionOutcome | None:
+        if progress_callback:
+            progress_callback(
+                current_phase="Updating location",
+                current_router_ip=router.ip,
+                current_router_name=router.device_name,
+                processed_count=processed_count,
+                message=f"Updating location for router {router.ip}.",
+            )
+
         update_result = self._digi.update_system_location(
             device_id=router.device_id,
             new_location=router.new_location,
@@ -100,6 +178,15 @@ class ExecutionService:
             return None
 
         if not reboot_enabled:
+            if progress_callback:
+                progress_callback(
+                    current_phase="Verifying location",
+                    current_router_ip=router.ip,
+                    current_router_name=router.device_name,
+                    processed_count=processed_count,
+                    message=f"Verifying location for router {router.ip}.",
+                )
+
             self._finalize_router_with_location_verification(
                 execution_id=execution_id,
                 router=router,
@@ -109,6 +196,15 @@ class ExecutionService:
                 digi_pass=digi_pass,
             )
             return None
+
+        if progress_callback:
+            progress_callback(
+                current_phase="Sending reboot",
+                current_router_ip=router.ip,
+                current_router_name=router.device_name,
+                processed_count=processed_count,
+                message=f"Sending reboot command to router {router.ip}.",
+            )
 
         reboot_result = self._digi.reboot_device(
             device_id=router.device_id,
@@ -128,16 +224,42 @@ class ExecutionService:
             )
             return None
 
-        sleep_seconds(self._wait_after_send)
+        if progress_callback:
+            progress_callback(
+                current_phase="Waiting after reboot",
+                current_router_ip=router.ip,
+                current_router_name=router.device_name,
+                processed_count=processed_count,
+                countdown_seconds=self._wait_after_send,
+                countdown_label="Waiting after reboot",
+                message=f"Waiting after reboot for router {router.ip}.",
+            )
 
-        success = poll_until(
-            lambda: self._is_router_connected(
-                device_id=router.device_id,
-                digi_user=digi_user,
-                digi_pass=digi_pass,
-            ),
-            interval_seconds=self._poll_interval,
-            max_attempts=self._max_attempts,
+        for remaining in range(self._wait_after_send, 0, -1):
+            if progress_callback:
+                progress_callback(
+                    countdown_seconds=remaining,
+                    countdown_label="Waiting after reboot",
+                )
+            sleep_seconds(1)
+
+        if progress_callback:
+            progress_callback(
+                current_phase="Polling reconnect",
+                current_router_ip=router.ip,
+                current_router_name=router.device_name,
+                processed_count=processed_count,
+                countdown_seconds=None,
+                countdown_label=None,
+                message=f"Polling reconnect status for router {router.ip}.",
+            )
+
+        success = self._poll_router_reconnect(
+            router=router,
+            digi_user=digi_user,
+            digi_pass=digi_pass,
+            processed_count=processed_count,
+            progress_callback=progress_callback,
         )
 
         if not success:
@@ -159,6 +281,15 @@ class ExecutionService:
                 ),
             )
 
+        if progress_callback:
+            progress_callback(
+                current_phase="Verifying location",
+                current_router_ip=router.ip,
+                current_router_name=router.device_name,
+                processed_count=processed_count,
+                message=f"Verifying location for router {router.ip}.",
+            )
+
         self._finalize_router_with_location_verification(
             execution_id=execution_id,
             router=router,
@@ -168,6 +299,55 @@ class ExecutionService:
             digi_pass=digi_pass,
         )
         return None
+
+    def _poll_router_reconnect(
+        self,
+        router: RouterResult,
+        digi_user: str | None,
+        digi_pass: str | None,
+        processed_count: int,
+        progress_callback: Callable[..., None] | None = None,
+    ) -> bool:
+        for attempt in range(1, self._max_attempts + 1):
+            is_connected = self._is_router_connected(
+                device_id=router.device_id,
+                digi_user=digi_user,
+                digi_pass=digi_pass,
+            )
+
+            if is_connected:
+                return True
+
+            if attempt < self._max_attempts:
+                if progress_callback:
+                    progress_callback(
+                        current_phase="Polling reconnect",
+                        current_router_ip=router.ip,
+                        current_router_name=router.device_name,
+                        processed_count=processed_count,
+                        countdown_seconds=self._poll_interval,
+                        countdown_label=f"Reconnect check {attempt}/{self._max_attempts}",
+                        message=(
+                            f"Router {router.ip} is still offline. "
+                            f"Next reconnect check in {self._poll_interval} seconds."
+                        ),
+                    )
+
+                for remaining in range(self._poll_interval, 0, -1):
+                    if progress_callback:
+                        progress_callback(
+                            countdown_seconds=remaining,
+                            countdown_label=f"Reconnect check {attempt}/{self._max_attempts}",
+                        )
+                    sleep_seconds(1)
+
+        if progress_callback:
+            progress_callback(
+                countdown_seconds=None,
+                countdown_label=None,
+            )
+
+        return False
 
     def _finalize_router_with_location_verification(
         self,

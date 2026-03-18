@@ -29,6 +29,11 @@ const rebootedCount = document.getElementById("rebootedCount");
 const failedCount = document.getElementById("failedCount");
 const executionStatus = document.getElementById("executionStatus");
 
+const liveCurrentPhase = document.getElementById("liveCurrentPhase");
+const liveCurrentRouter = document.getElementById("liveCurrentRouter");
+const liveProcessedTotal = document.getElementById("liveProcessedTotal");
+const liveCountdown = document.getElementById("liveCountdown");
+
 function setStatus(text) {
   appStatus.textContent = text;
 }
@@ -57,6 +62,51 @@ function setIdleControls() {
   continueBtn.disabled = true;
   stopBtn.disabled = true;
   refreshBtn.disabled = !currentExecutionId;
+}
+
+function formatCountdown(seconds) {
+  if (seconds === null || seconds === undefined) {
+    return "-";
+  }
+
+  const safeSeconds = Math.max(0, Number(seconds));
+  const mins = Math.floor(safeSeconds / 60);
+  const secs = safeSeconds % 60;
+
+  return `${String(mins).padStart(2, "0")}:${String(secs).padStart(2, "0")}`;
+}
+
+function renderLiveProgress(jobData) {
+  if (!jobData) {
+    liveCurrentPhase.textContent = "-";
+    liveCurrentRouter.textContent = "-";
+    liveProcessedTotal.textContent = "0 / 0";
+    liveCountdown.textContent = "-";
+    return;
+  }
+
+  liveCurrentPhase.textContent = jobData.current_phase ?? "-";
+
+  const routerParts = [];
+  if (jobData.current_router_name) {
+    routerParts.push(jobData.current_router_name);
+  }
+  if (jobData.current_router_ip) {
+    routerParts.push(jobData.current_router_ip);
+  }
+
+  liveCurrentRouter.textContent = routerParts.length > 0 ? routerParts.join(" | ") : "-";
+
+  const processed = jobData.processed_count ?? 0;
+  const total = jobData.total_count ?? 0;
+  liveProcessedTotal.textContent = `${processed} / ${total}`;
+
+  if (jobData.countdown_seconds !== null && jobData.countdown_seconds !== undefined) {
+    const label = jobData.countdown_label ? `${jobData.countdown_label}: ` : "";
+    liveCountdown.textContent = `${label}${formatCountdown(jobData.countdown_seconds)}`;
+  } else {
+    liveCountdown.textContent = "-";
+  }
 }
 
 function renderSummary(execution) {
@@ -174,10 +224,11 @@ async function pollExecutionStatus() {
     }
 
     const jobData = await jobResponse.json();
+    renderLiveProgress(jobData);
 
     if (jobData.status === "running") {
       setStatus("Running");
-      currentPhaseLabel.textContent = "Execution Running";
+      currentPhaseLabel.textContent = jobData.current_phase || "Execution Running";
       setRunningControls(true);
       if (jobData.message) {
         setMessage(jobData.message);
@@ -269,6 +320,7 @@ validateBtn.addEventListener("click", async () => {
     currentPhaseLabel.textContent = "Preparation / Validation";
     setPausedControls(false);
     stopPolling();
+    renderLiveProgress(null);
 
     const response = await fetch("/validate", {
       method: "POST",
@@ -444,6 +496,7 @@ stopBtn.addEventListener("click", async () => {
     setStatus("Cancelled");
     currentPhaseLabel.textContent = "Cancelled";
     setIdleControls();
+    renderLiveProgress(null);
     stopPolling();
   } catch (error) {
     setMessage(`Unexpected error during stop execution: ${error}`);
