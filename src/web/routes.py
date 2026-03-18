@@ -59,6 +59,9 @@ def register_routes(
         reboot_enabled_raw = request.form.get("reboot_enabled", "true").lower()
         reboot_enabled = reboot_enabled_raw == "true"
 
+        digi_user = (request.form.get("digi_user") or "").strip() or None
+        digi_pass = (request.form.get("digi_pass") or "").strip() or None
+
         input_dir = Path("input")
         input_dir.mkdir(parents=True, exist_ok=True)
 
@@ -78,7 +81,11 @@ def register_routes(
         router_results: list[RouterResult] = []
 
         for row in validation_result.valid_rows:
-            device = digi_service.search_device_by_ip(row.ip)
+            device = digi_service.search_device_by_ip(
+                row.ip,
+                digi_user=digi_user,
+                digi_pass=digi_pass,
+            )
 
             if device is None:
                 router_results.append(
@@ -149,6 +156,8 @@ def register_routes(
 
         execution_id = data.get("execution_id")
         reboot_enabled = data.get("reboot_enabled")
+        digi_user = (data.get("digi_user") or "").strip() or None
+        digi_pass = (data.get("digi_pass") or "").strip() or None
 
         if not execution_id:
             return jsonify({"error": "execution_id is required."}), 400
@@ -178,6 +187,8 @@ def register_routes(
             execution_id=execution_id,
             routers=router_results,
             reboot_enabled=reboot_enabled,
+            digi_user=digi_user,
+            digi_pass=digi_pass,
         )
 
         updated_detail = audit_service.get_execution_detail(execution_id)

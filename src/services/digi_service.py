@@ -21,26 +21,42 @@ class DigiOperationResult:
 class DigiService:
     def __init__(self, settings: Settings) -> None:
         self._settings = settings
-        self._auth = HTTPBasicAuth(
-            self._settings.digi_user,
-            self._settings.digi_pass,
-        )
         self._timeout = self._settings.digi_timeout_seconds
+
+    def _build_auth(
+        self,
+        digi_user: str | None = None,
+        digi_pass: str | None = None,
+    ) -> HTTPBasicAuth:
+        user = digi_user.strip() if digi_user and digi_user.strip() else self._settings.digi_user
+        password = digi_pass if digi_pass and digi_pass.strip() else self._settings.digi_pass
+        return HTTPBasicAuth(user, password)
 
     def _build_url(self, endpoint: str) -> str:
         return f"{self._settings.digi_base_url}/{endpoint.lstrip('/')}"
 
-    def _get(self, endpoint: str) -> requests.Response:
+    def _get(
+        self,
+        endpoint: str,
+        digi_user: str | None = None,
+        digi_pass: str | None = None,
+    ) -> requests.Response:
         url = self._build_url(endpoint)
         response = requests.get(
             url,
-            auth=self._auth,
+            auth=self._build_auth(digi_user, digi_pass),
             timeout=self._timeout,
         )
         response.raise_for_status()
         return response
 
-    def _post_xml(self, endpoint: str, payload: str) -> requests.Response:
+    def _post_xml(
+        self,
+        endpoint: str,
+        payload: str,
+        digi_user: str | None = None,
+        digi_pass: str | None = None,
+    ) -> requests.Response:
         url = self._build_url(endpoint)
         headers = {
             "Content-Type": "application/xml",
@@ -49,7 +65,7 @@ class DigiService:
             url,
             data=payload.encode("utf-8"),
             headers=headers,
-            auth=self._auth,
+            auth=self._build_auth(digi_user, digi_pass),
             timeout=self._timeout,
         )
         response.raise_for_status()
@@ -67,40 +83,59 @@ class DigiService:
             connection_status=device_data.get("connection_status"),
         )
 
-    def search_device_by_ip(self, ip: str) -> Digi | None:
+    def search_device_by_ip(
+        self,
+        ip: str,
+        digi_user: str | None = None,
+        digi_pass: str | None = None,
+    ) -> Digi | None:
         endpoint = f"{self._settings.digi_search_node_by_ip}'{ip}'"
 
-        try:
-            response = self._get(endpoint)
-            payload = response.json()
+        response = self._get(
+            endpoint,
+            digi_user=digi_user,
+            digi_pass=digi_pass,
+        )
+        payload = response.json()
 
-            devices = payload.get("list", [])
-            if not devices:
-                return None
+        devices = payload.get("list", [])
+        if not devices:
+            return None
 
-            first_device = devices[0]
-            return self._map_device_to_domain(first_device)
+        first_device = devices[0]
+        return self._map_device_to_domain(first_device)
 
-        except RequestException:
-            raise
-
-    def get_device_by_id(self, device_id: str) -> Digi | None:
+    def get_device_by_id(
+        self,
+        device_id: str,
+        digi_user: str | None = None,
+        digi_pass: str | None = None,
+    ) -> Digi | None:
         endpoint = f"{self._settings.digi_search_node_by_id}{device_id}"
 
-        try:
-            response = self._get(endpoint)
-            payload = response.json()
+        response = self._get(
+            endpoint,
+            digi_user=digi_user,
+            digi_pass=digi_pass,
+        )
+        payload = response.json()
 
-            if not payload:
-                return None
+        if not payload:
+            return None
 
-            return self._map_device_to_domain(payload)
+        return self._map_device_to_domain(payload)
 
-        except RequestException:
-            raise
-
-    def get_connection_status_by_id(self, device_id: str) -> str | None:
-        device = self.get_device_by_id(device_id)
+    def get_connection_status_by_id(
+        self,
+        device_id: str,
+        digi_user: str | None = None,
+        digi_pass: str | None = None,
+    ) -> str | None:
+        device = self.get_device_by_id(
+            device_id,
+            digi_user=digi_user,
+            digi_pass=digi_pass,
+        )
         if not device:
             return None
         return device.connection_status
@@ -109,6 +144,8 @@ class DigiService:
         self,
         device_id: str,
         new_location: str,
+        digi_user: str | None = None,
+        digi_pass: str | None = None,
     ) -> DigiOperationResult:
         payload = f"""<sci_request version="1.0">
   <send_message>
@@ -126,7 +163,12 @@ class DigiService:
 </sci_request>"""
 
         try:
-            response = self._post_xml(self._settings.digi_sci_api, payload)
+            response = self._post_xml(
+                self._settings.digi_sci_api,
+                payload,
+                digi_user=digi_user,
+                digi_pass=digi_pass,
+            )
 
             return DigiOperationResult(
                 success=True,
@@ -143,7 +185,12 @@ class DigiService:
                 data=None,
             )
 
-    def reboot_device(self, device_id: str) -> DigiOperationResult:
+    def reboot_device(
+        self,
+        device_id: str,
+        digi_user: str | None = None,
+        digi_pass: str | None = None,
+    ) -> DigiOperationResult:
         payload = f"""<sci_request version="1.0">
   <reboot>
     <targets>
@@ -153,7 +200,12 @@ class DigiService:
 </sci_request>"""
 
         try:
-            response = self._post_xml(self._settings.digi_sci_api, payload)
+            response = self._post_xml(
+                self._settings.digi_sci_api,
+                payload,
+                digi_user=digi_user,
+                digi_pass=digi_pass,
+            )
 
             return DigiOperationResult(
                 success=True,

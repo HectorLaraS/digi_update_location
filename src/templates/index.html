@@ -1,122 +1,151 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
+  <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Digi Update Location</title>
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}" />
-</head>
-<body>
+    <link
+      rel="stylesheet"
+      href="{{ url_for('static', filename='css/style.css') }}"
+    />
+  </head>
+  <body>
     <div class="page">
-        <header class="header">
-            <div>
-                <h1>Digi Update Location</h1>
-                <p class="subtitle">Validate, execute and track Digi router location updates.</p>
-            </div>
-            <div class="status-badge" id="app-status">Idle</div>
-        </header>
+      <header class="header">
+        <div>
+          <h1>Digi Update Location</h1>
+          <p class="subtitle">
+            Validate, execute and track Digi router location updates.
+          </p>
+        </div>
+        <div class="status-badge" id="app-status">Idle</div>
+      </header>
 
-        <section class="panel controls-panel">
-            <div class="controls-grid">
-                <div class="field">
-                    <label for="executedBy">Executed By</label>
-                    <input type="text" id="executedBy" placeholder="Enter your name" />
-                </div>
+      <section class="panel controls-panel">
+        <div class="controls-grid">
+          <div class="field">
+            <label for="digiUser">Digi User / Email</label>
+            <input
+              type="text"
+              id="digiUser"
+              placeholder="Optional - fallback to .env if empty"
+            />
+          </div>
 
-                <div class="field">
-                    <label for="csvFile">CSV File</label>
-                    <input type="file" id="csvFile" accept=".csv" />
-                </div>
+          <div class="field">
+            <label for="digiPassword">Digi Password</label>
+            <input
+              type="password"
+              id="digiPassword"
+              placeholder="Optional - fallback to .env if empty"
+            />
+          </div>
 
-                <div class="field checkbox-field">
-                    <label for="rebootEnabled">Enable Reboot</label>
-                    <input type="checkbox" id="rebootEnabled" checked />
-                </div>
-            </div>
+          <div class="field">
+            <label for="executedBy">Executed By</label>
+            <input type="text" id="executedBy" placeholder="Enter your name" />
+          </div>
 
-            <div class="button-row">
-                <button id="validateBtn">Validate</button>
-                <button id="executeBtn" disabled>Execute</button>
-                <button id="refreshBtn" disabled>Refresh Status</button>
-            </div>
+          <div class="field">
+            <label for="csvFile">CSV File</label>
+            <input type="file" id="csvFile" accept=".csv" />
+          </div>
 
-            <div class="execution-info">
-                <div><strong>Execution ID:</strong> <span id="executionId">-</span></div>
-                <div><strong>Current Phase:</strong> <span id="currentPhase">Idle</span></div>
-                <div><strong>Progress:</strong> <span id="progressText">0 / 0</span></div>
-            </div>
-        </section>
+          <div class="field checkbox-field">
+            <label for="rebootEnabled">Enable Reboot</label>
+            <input type="checkbox" id="rebootEnabled" checked />
+          </div>
+        </div>
 
-        <section class="panel summary-panel">
-            <div class="summary-grid">
-                <div class="summary-card">
-                    <span class="summary-title">Total Rows</span>
-                    <span class="summary-value" id="totalRows">0</span>
-                </div>
-                <div class="summary-card">
-                    <span class="summary-title">Ready</span>
-                    <span class="summary-value" id="readyCount">0</span>
-                </div>
-                <div class="summary-card">
-                    <span class="summary-title">Not Found</span>
-                    <span class="summary-value" id="notFoundCount">0</span>
-                </div>
-                <div class="summary-card">
-                    <span class="summary-title">Disconnected</span>
-                    <span class="summary-value" id="disconnectedCount">0</span>
-                </div>
-                <div class="summary-card">
-                    <span class="summary-title">Updated</span>
-                    <span class="summary-value" id="updatedCount">0</span>
-                </div>
-                <div class="summary-card">
-                    <span class="summary-title">Rebooted</span>
-                    <span class="summary-value" id="rebootedCount">0</span>
-                </div>
-                <div class="summary-card">
-                    <span class="summary-title">Failed</span>
-                    <span class="summary-value" id="failedCount">0</span>
-                </div>
-                <div class="summary-card">
-                    <span class="summary-title">Execution Status</span>
-                    <span class="summary-value" id="executionStatus">-</span>
-                </div>
-            </div>
-        </section>
+        <div class="button-row">
+          <button id="validateBtn">Validate</button>
+          <button id="executeBtn" disabled>Execute</button>
+          <button id="refreshBtn" disabled>Refresh Status</button>
+        </div>
 
-        <section class="panel messages-panel">
-            <h2>Messages</h2>
-            <div id="messagesBox" class="messages-box">No messages yet.</div>
-        </section>
+        <div class="execution-info">
+          <div>
+            <strong>Execution ID:</strong> <span id="executionId">-</span>
+          </div>
+          <div>
+            <strong>Current Phase:</strong> <span id="currentPhase">Idle</span>
+          </div>
+          <div>
+            <strong>Progress:</strong> <span id="progressText">0 / 0</span>
+          </div>
+        </div>
+      </section>
 
-        <section class="panel table-panel">
-            <div class="table-wrapper">
-                <table id="routersTable">
-                    <thead>
-                        <tr>
-                            <th>Name</th>
-                            <th>IP</th>
-                            <th>Old Location</th>
-                            <th>New Location</th>
-                            <th>Type</th>
-                            <th>Connected Status</th>
-                            <th>System Status Before</th>
-                            <th>System Status After</th>
-                            <th>Update Result</th>
-                            <th>Reboot Result</th>
-                            <th>Notes</th>
-                        </tr>
-                    </thead>
-                    <tbody id="routersTableBody">
-                        <tr>
-                            <td colspan="11" class="empty-row">No data loaded yet.</td>
-                        </tr>
-                    </tbody>
-                </table>
-            </div>
-        </section>
+      <section class="panel summary-panel">
+        <div class="summary-grid">
+          <div class="summary-card">
+            <span class="summary-title">Total Rows</span>
+            <span class="summary-value" id="totalRows">0</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-title">Ready</span>
+            <span class="summary-value" id="readyCount">0</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-title">Not Found</span>
+            <span class="summary-value" id="notFoundCount">0</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-title">Disconnected</span>
+            <span class="summary-value" id="disconnectedCount">0</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-title">Updated</span>
+            <span class="summary-value" id="updatedCount">0</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-title">Rebooted</span>
+            <span class="summary-value" id="rebootedCount">0</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-title">Failed</span>
+            <span class="summary-value" id="failedCount">0</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-title">Execution Status</span>
+            <span class="summary-value" id="executionStatus">-</span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel messages-panel">
+        <h2>Messages</h2>
+        <div id="messagesBox" class="messages-box">No messages yet.</div>
+      </section>
+
+      <section class="panel table-panel">
+        <div class="table-wrapper">
+          <table id="routersTable">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>IP</th>
+                <th>Old Location</th>
+                <th>New Location</th>
+                <th>Type</th>
+                <th>Connected Status</th>
+                <th>System Status Before</th>
+                <th>System Status After</th>
+                <th>Update Result</th>
+                <th>Reboot Result</th>
+                <th>Notes</th>
+              </tr>
+            </thead>
+            <tbody id="routersTableBody">
+              <tr>
+                <td colspan="11" class="empty-row">No data loaded yet.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
 
     <script src="{{ url_for('static', filename='js/app.js') }}"></script>
-</body>
+  </body>
 </html>

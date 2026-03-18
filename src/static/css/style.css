@@ -58,7 +58,7 @@ body {
 
 .controls-grid {
     display: grid;
-    grid-template-columns: 1.2fr 1.5fr 0.6fr;
+    grid-template-columns: repeat(5, 1fr);
     gap: 16px;
     margin-bottom: 16px;
 }
@@ -75,6 +75,7 @@ body {
 }
 
 .field input[type="text"],
+.field input[type="password"],
 .field input[type="file"] {
     padding: 10px 12px;
     border: 1px solid #334155;
