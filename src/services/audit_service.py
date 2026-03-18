@@ -56,6 +56,25 @@ class AuditService:
             execution_status="validated",
         )
 
+    def update_execution_status(
+        self,
+        execution_id: str,
+        execution_status: str,
+    ) -> None:
+        self._audit_repository.update_execution_status(
+            execution_id=execution_id,
+            execution_status=execution_status,
+        )
+
+    def mark_execution_running(self, execution_id: str) -> None:
+        self.update_execution_status(execution_id, "running")
+
+    def mark_execution_paused(self, execution_id: str) -> None:
+        self.update_execution_status(execution_id, "paused")
+
+    def mark_execution_cancelled(self, execution_id: str) -> None:
+        self.update_execution_status(execution_id, "cancelled")
+
     def update_router_execution_result(
         self,
         execution_id: str,
@@ -89,7 +108,6 @@ class AuditService:
         for router in routers:
             update_result = router.get("update_result")
             reboot_result = router.get("reboot_result")
-            system_status_after = router.get("system_status_after")
 
             if update_result == "success":
                 updated_count += 1

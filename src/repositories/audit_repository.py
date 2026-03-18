@@ -74,6 +74,28 @@ class AuditRepository:
             )
             connection.commit()
 
+    def update_execution_status(
+        self,
+        execution_id: str,
+        execution_status: str,
+    ) -> None:
+        query = """
+        UPDATE dbo.audit_log
+        SET
+            execution_status = ?,
+            updated_at = SYSDATETIME()
+        WHERE execution_id = ?;
+        """
+
+        with self._db_manager.get_connection() as connection:
+            cursor = connection.cursor()
+            cursor.execute(
+                query,
+                execution_status,
+                execution_id,
+            )
+            connection.commit()
+
     def update_execution_results(
         self,
         execution_id: str,

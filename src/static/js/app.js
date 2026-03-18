@@ -9,6 +9,8 @@ const rebootEnabledInput = document.getElementById("rebootEnabled");
 const validateBtn = document.getElementById("validateBtn");
 const executeBtn = document.getElementById("executeBtn");
 const refreshBtn = document.getElementById("refreshBtn");
+const continueBtn = document.getElementById("continueBtn");
+const stopBtn = document.getElementById("stopBtn");
 
 const appStatus = document.getElementById("app-status");
 const executionIdLabel = document.getElementById("executionId");
@@ -34,6 +36,12 @@ function setMessage(text) {
   messagesBox.textContent = text || "No messages yet.";
 }
 
+function setPausedControls(isPaused) {
+  continueBtn.disabled = !isPaused;
+  stopBtn.disabled = !isPaused;
+  executeBtn.disabled = isPaused || !currentExecutionId;
+}
+
 function renderSummary(execution) {
   if (!execution) {
     totalRows.textContent = "0";
@@ -44,6 +52,7 @@ function renderSummary(execution) {
     rebootedCount.textContent = "0";
     failedCount.textContent = "0";
     executionStatus.textContent = "-";
+    setPausedControls(false);
     return;
   }
 
@@ -55,6 +64,8 @@ function renderSummary(execution) {
   rebootedCount.textContent = execution.rebooted_count ?? 0;
   failedCount.textContent = execution.failed_count ?? 0;
   executionStatus.textContent = execution.execution_status ?? "-";
+
+  setPausedControls(execution.execution_status === "paused");
 }
 
 function renderStatusBadge(value, kind = "status") {
@@ -112,8 +123,8 @@ async function loadExecution(executionId) {
 
   currentExecutionId = data.execution?.execution_id || executionId;
   executionIdLabel.textContent = currentExecutionId || "-";
-  executeBtn.disabled = false;
   refreshBtn.disabled = false;
+  executeBtn.disabled = !currentExecutionId || data.execution?.execution_status === "paused";
 }
 
 function validateCredentialPair(digiUser, digiPassword) {
@@ -150,6 +161,7 @@ validateBtn.addEventListener("click", async () => {
   try {
     setStatus("Validating...");
     currentPhaseLabel.textContent = "Preparation / Validation";
+    setPausedControls(false);
 
     const response = await fetch("/validate", {
       method: "POST",
@@ -204,6 +216,7 @@ executeBtn.addEventListener("click", async () => {
   try {
     setStatus("Executing...");
     currentPhaseLabel.textContent = "Execution";
+    setPausedControls(false);
 
     const response = await fetch("/execute", {
       method: "POST",
@@ -228,10 +241,121 @@ executeBtn.addEventListener("click", async () => {
 
     renderSummary(data.execution);
     renderRouters(data.routers);
+
+    if (data.status === "paused") {
+      setMessage(
+        data.message ||
+          `Execution paused. Router ${data.paused_router_ip || "-"} did not come back online.`
+      );
+      setStatus("Paused");
+      currentPhaseLabel.textContent = "Paused";
+      setPausedControls(true);
+      return;
+    }
+
     setMessage("Execution completed.");
     setStatus("Completed");
+    currentPhaseLabel.textContent = "Execution Completed";
   } catch (error) {
     setMessage(`Unexpected error during execution: ${error}`);
+    setStatus("Error");
+  }
+});
+
+continueBtn.addEventListener("click", async () => {
+  if (!currentExecutionId) {
+    setMessage("No paused execution available.");
+    return;
+  }
+
+  const digiUser = digiUserInput.value.trim();
+  const digiPassword = digiPasswordInput.value;
+
+  if (!validateCredentialPair(digiUser, digiPassword)) {
+    return;
+  }
+
+  try {
+    setStatus("Continuing...");
+    currentPhaseLabel.textContent = "Continue Execution";
+
+    const response = await fetch(`/execution/${currentExecutionId}/continue`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        reboot_enabled: rebootEnabledInput.checked,
+        digi_user: digiUser,
+        digi_pass: digiPassword,
+      }),
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setMessage(data.error || "Continue execution failed.");
+      setStatus("Error");
+      return;
+    }
+
+    renderSummary(data.execution);
+    renderRouters(data.routers);
+
+    if (data.status === "paused") {
+      setMessage(
+        data.message ||
+          `Execution paused again. Router ${data.paused_router_ip || "-"} did not come back online.`
+      );
+      setStatus("Paused");
+      currentPhaseLabel.textContent = "Paused";
+      setPausedControls(true);
+      return;
+    }
+
+    setMessage("Execution continued and completed.");
+    setStatus("Completed");
+    currentPhaseLabel.textContent = "Execution Completed";
+    setPausedControls(false);
+  } catch (error) {
+    setMessage(`Unexpected error during continue execution: ${error}`);
+    setStatus("Error");
+  }
+});
+
+stopBtn.addEventListener("click", async () => {
+  if (!currentExecutionId) {
+    setMessage("No paused execution available.");
+    return;
+  }
+
+  try {
+    setStatus("Stopping...");
+    currentPhaseLabel.textContent = "Stop Execution";
+
+    const response = await fetch(`/execution/${currentExecutionId}/stop`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+    });
+
+    const data = await response.json();
+
+    if (!response.ok) {
+      setMessage(data.error || "Stop execution failed.");
+      setStatus("Error");
+      return;
+    }
+
+    renderSummary(data.execution);
+    renderRouters(data.routers);
+    setMessage(data.message || "Execution was cancelled.");
+    setStatus("Cancelled");
+    currentPhaseLabel.textContent = "Cancelled";
+    setPausedControls(false);
+  } catch (error) {
+    setMessage(`Unexpected error during stop execution: ${error}`);
     setStatus("Error");
   }
 });

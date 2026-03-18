@@ -1,9 +1,18 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from src.domain.router_result import RouterResult
 from src.services.audit_service import AuditService
 from src.services.digi_service import DigiService
 from src.utils.timers import poll_until, sleep_seconds
+
+
+@dataclass(frozen=True)
+class ExecutionOutcome:
+    status: str
+    paused_router_ip: str | None = None
+    message: str | None = None
 
 
 class ExecutionService:
@@ -33,14 +42,16 @@ class ExecutionService:
         reboot_enabled: bool | None = None,
         digi_user: str | None = None,
         digi_pass: str | None = None,
-    ) -> None:
+    ) -> ExecutionOutcome:
         if reboot_enabled is None:
             reboot_enabled = self._reboot_enabled_default
+
+        self._audit.mark_execution_running(execution_id)
 
         ready_routers = [router for router in routers if router.system_status == "ready"]
 
         for index, router in enumerate(ready_routers, start=1):
-            self._process_single_router(
+            outcome = self._process_single_router(
                 execution_id=execution_id,
                 router=router,
                 reboot_enabled=reboot_enabled,
@@ -48,10 +59,18 @@ class ExecutionService:
                 digi_pass=digi_pass,
             )
 
+            if outcome is not None and outcome.status == "paused":
+                self._audit.mark_execution_paused(execution_id)
+                return outcome
+
             if reboot_enabled and index < len(ready_routers):
                 sleep_seconds(self._delay_between)
 
         self._audit.finalize_execution(execution_id)
+        return ExecutionOutcome(
+            status="completed",
+            message="Execution completed successfully.",
+        )
 
     def _process_single_router(
         self,
@@ -60,7 +79,7 @@ class ExecutionService:
         reboot_enabled: bool,
         digi_user: str | None,
         digi_pass: str | None,
-    ) -> None:
+    ) -> ExecutionOutcome | None:
         update_result = self._digi.update_system_location(
             device_id=router.device_id,
             new_location=router.new_location,
@@ -78,7 +97,7 @@ class ExecutionService:
                 reboot_result="skipped",
                 notes=update_result.message,
             )
-            return
+            return None
 
         if not reboot_enabled:
             self._finalize_router_with_location_verification(
@@ -89,7 +108,7 @@ class ExecutionService:
                 digi_user=digi_user,
                 digi_pass=digi_pass,
             )
-            return
+            return None
 
         reboot_result = self._digi.reboot_device(
             device_id=router.device_id,
@@ -107,7 +126,7 @@ class ExecutionService:
                 reboot_result="failed",
                 notes=reboot_result.message,
             )
-            return
+            return None
 
         sleep_seconds(self._wait_after_send)
 
@@ -131,7 +150,14 @@ class ExecutionService:
                 reboot_result="timeout",
                 notes="Router did not come back online in time.",
             )
-            return
+            return ExecutionOutcome(
+                status="paused",
+                paused_router_ip=router.ip,
+                message=(
+                    f"Execution paused because router {router.ip} "
+                    f"did not come back online in time."
+                ),
+            )
 
         self._finalize_router_with_location_verification(
             execution_id=execution_id,
@@ -141,6 +167,7 @@ class ExecutionService:
             digi_user=digi_user,
             digi_pass=digi_pass,
         )
+        return None
 
     def _finalize_router_with_location_verification(
         self,
@@ -174,9 +201,7 @@ class ExecutionService:
 
         if current_location == expected_location:
             final_status = "updated_no_reboot" if reboot_result == "skipped" else "done"
-            notes = (
-                f"{success_message} Verified location: {current_location or '-'}."
-            )
+            notes = f"{success_message} Verified location: {current_location or '-'}."
         else:
             final_status = "verification_failed"
             notes = (

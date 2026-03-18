@@ -34,6 +34,28 @@ def _serialize_record(record: dict | None) -> dict | None:
     return {key: _serialize_value(val) for key, val in record.items()}
 
 
+def _build_router_results(routers_data: list[dict]) -> list[RouterResult]:
+    router_results: list[RouterResult] = []
+
+    for router in routers_data:
+        router_results.append(
+            RouterResult(
+                execution_id=router["execution_id"],
+                ip=router["ip_address"],
+                new_location=router["new_location"],
+                device_id=router.get("device_id"),
+                device_name=router.get("device_name"),
+                old_location=router.get("old_location"),
+                device_type=router.get("device_type"),
+                connection_status=router.get("connection_status_before"),
+                system_status=router.get("system_status_before"),
+                message=router.get("notes"),
+            )
+        )
+
+    return router_results
+
+
 def register_routes(
     app: Flask,
     audit_service: AuditService,
@@ -166,26 +188,9 @@ def register_routes(
 
         detail = audit_service.get_execution_detail(execution_id)
         routers_data = detail["routers"]
+        router_results = _build_router_results(routers_data)
 
-        router_results: list[RouterResult] = []
-
-        for router in routers_data:
-            router_results.append(
-                RouterResult(
-                    execution_id=router["execution_id"],
-                    ip=router["ip_address"],
-                    new_location=router["new_location"],
-                    device_id=router.get("device_id"),
-                    device_name=router.get("device_name"),
-                    old_location=router.get("old_location"),
-                    device_type=router.get("device_type"),
-                    connection_status=router.get("connection_status_before"),
-                    system_status=router.get("system_status_before"),
-                    message=router.get("notes"),
-                )
-            )
-
-        execution_service.execute(
+        outcome = execution_service.execute(
             execution_id=execution_id,
             routers=router_results,
             reboot_enabled=reboot_enabled,
@@ -198,7 +203,76 @@ def register_routes(
         return (
             jsonify(
                 {
-                    "status": "completed",
+                    "status": outcome.status,
+                    "message": outcome.message,
+                    "paused_router_ip": outcome.paused_router_ip,
+                    "execution": _serialize_record(updated_detail["execution"]),
+                    "routers": _serialize_records(updated_detail["routers"]),
+                }
+            ),
+            200,
+        )
+
+    @app.post("/execution/<execution_id>/continue")
+    def continue_execution(execution_id: str) -> tuple:
+        data = request.get_json(silent=True) or {}
+
+        reboot_enabled = data.get("reboot_enabled")
+        digi_user = (data.get("digi_user") or "").strip() or None
+        digi_pass = (data.get("digi_pass") or "").strip() or None
+
+        detail = audit_service.get_execution_detail(execution_id)
+        if not detail["execution"]:
+            return jsonify({"error": "Execution not found."}), 404
+
+        routers_data = detail["routers"]
+
+        routers_to_continue = [
+            router for router in routers_data
+            if router.get("system_status_before") == "ready"
+            and router.get("system_status_after") is None
+        ]
+
+        router_results = _build_router_results(routers_to_continue)
+
+        outcome = execution_service.execute(
+            execution_id=execution_id,
+            routers=router_results,
+            reboot_enabled=reboot_enabled,
+            digi_user=digi_user,
+            digi_pass=digi_pass,
+        )
+
+        updated_detail = audit_service.get_execution_detail(execution_id)
+
+        return (
+            jsonify(
+                {
+                    "status": outcome.status,
+                    "message": outcome.message,
+                    "paused_router_ip": outcome.paused_router_ip,
+                    "execution": _serialize_record(updated_detail["execution"]),
+                    "routers": _serialize_records(updated_detail["routers"]),
+                }
+            ),
+            200,
+        )
+
+    @app.post("/execution/<execution_id>/stop")
+    def stop_execution(execution_id: str) -> tuple:
+        detail = audit_service.get_execution_detail(execution_id)
+        if not detail["execution"]:
+            return jsonify({"error": "Execution not found."}), 404
+
+        audit_service.mark_execution_cancelled(execution_id)
+
+        updated_detail = audit_service.get_execution_detail(execution_id)
+
+        return (
+            jsonify(
+                {
+                    "status": "cancelled",
+                    "message": "Execution was cancelled by the user.",
                     "execution": _serialize_record(updated_detail["execution"]),
                     "routers": _serialize_records(updated_detail["routers"]),
                 }
