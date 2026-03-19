@@ -12,7 +12,9 @@ from src.services.csv_service import CsvService
 from src.services.digi_service import DigiService
 from src.services.execution_manager import ExecutionManager
 from src.services.execution_service import ExecutionService
+from src.services.manual_reboot_manager import ManualRebootManager
 from src.services.refresh_service import RefreshService
+from src.services.single_router_reboot_service import SingleRouterRebootService
 from src.services.validation_service import ValidationService
 
 
@@ -66,6 +68,8 @@ def register_routes(
     execution_service: ExecutionService,
     execution_manager: ExecutionManager,
     refresh_service: RefreshService,
+    single_router_reboot_service: SingleRouterRebootService,
+    manual_reboot_manager: ManualRebootManager,
 ) -> None:
     @app.get("/")
     def index() -> str:
@@ -102,6 +106,33 @@ def register_routes(
             200,
         )
 
+    @app.get("/execution/<execution_id>/router/<ip_address>/reboot-status")
+    def get_manual_reboot_status(execution_id: str, ip_address: str) -> tuple:
+        job = manual_reboot_manager.get_job_state(
+            execution_id=execution_id,
+            router_ip=ip_address,
+        )
+        if job is None:
+            return jsonify({"status": "not_found"}), 404
+
+        return (
+            jsonify(
+                {
+                    "execution_id": job.execution_id,
+                    "router_ip": job.router_ip,
+                    "status": job.status,
+                    "message": job.message,
+                    "is_running": job.is_running,
+                    "current_phase": job.current_phase,
+                    "attempt": job.attempt,
+                    "max_attempts": job.max_attempts,
+                    "countdown_seconds": job.countdown_seconds,
+                    "countdown_label": job.countdown_label,
+                }
+            ),
+            200,
+        )
+
     @app.post("/validate")
     def validate_csv() -> tuple:
         if "file" not in request.files:
@@ -109,7 +140,7 @@ def register_routes(
 
         file = request.files["file"]
         executed_by = (request.form.get("executed_by") or "").strip() or "unknown"
-        reboot_enabled_raw = request.form.get("reboot_enabled", "true").lower()
+        reboot_enabled_raw = request.form.get("reboot_enabled", "false").lower()
         reboot_enabled = reboot_enabled_raw == "true"
 
         digi_user = (request.form.get("digi_user") or "").strip() or None
@@ -313,6 +344,49 @@ def register_routes(
                 }
             ),
             200,
+        )
+
+    @app.post("/execution/<execution_id>/router/<ip_address>/reboot")
+    def reboot_single_router(execution_id: str, ip_address: str) -> tuple:
+        data = request.get_json(silent=True) or {}
+
+        digi_user = (data.get("digi_user") or "").strip() or None
+        digi_pass = (data.get("digi_pass") or "").strip() or None
+
+        detail = audit_service.get_execution_detail(execution_id)
+        if not detail["execution"]:
+            return jsonify({"error": "Execution not found."}), 404
+
+        routers_data = detail["routers"]
+        target_router = next(
+            (router for router in routers_data if router.get("ip_address") == ip_address),
+            None,
+        )
+
+        if target_router is None:
+            return jsonify({"error": "Router not found in execution."}), 404
+
+        job = manual_reboot_manager.start_manual_reboot(
+            execution_id=execution_id,
+            router_data=target_router,
+            digi_user=digi_user,
+            digi_pass=digi_pass,
+        )
+
+        updated_detail = audit_service.get_execution_detail(execution_id)
+
+        return (
+            jsonify(
+                {
+                    "status": job.status,
+                    "message": job.message,
+                    "router_ip": job.router_ip,
+                    "is_running": job.is_running,
+                    "execution": _serialize_record(updated_detail["execution"]),
+                    "routers": _serialize_records(updated_detail["routers"]),
+                }
+            ),
+            202,
         )
 
     @app.post("/execution/<execution_id>/refresh")

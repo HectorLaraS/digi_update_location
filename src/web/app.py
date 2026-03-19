@@ -14,7 +14,9 @@ from src.services.csv_service import CsvService
 from src.services.digi_service import DigiService
 from src.services.execution_manager import ExecutionManager
 from src.services.execution_service import ExecutionService
+from src.services.manual_reboot_manager import ManualRebootManager
 from src.services.refresh_service import RefreshService
+from src.services.single_router_reboot_service import SingleRouterRebootService
 from src.services.validation_service import ValidationService
 from src.web.routes import register_routes
 
@@ -67,6 +69,18 @@ def create_app() -> Flask:
         audit_service=audit_service,
     )
 
+    single_router_reboot_service = SingleRouterRebootService(
+        digi_service=digi_service,
+        audit_service=audit_service,
+        reboot_wait_after_send_seconds=settings.reboot_wait_after_send_seconds,
+        reboot_poll_interval_seconds=settings.reboot_poll_interval_seconds,
+        reboot_max_check_attempts=settings.reboot_max_check_attempts,
+    )
+
+    manual_reboot_manager = ManualRebootManager(
+        single_router_reboot_service=single_router_reboot_service,
+    )
+
     register_routes(
         app=app,
         audit_service=audit_service,
@@ -76,6 +90,8 @@ def create_app() -> Flask:
         execution_service=execution_service,
         execution_manager=execution_manager,
         refresh_service=refresh_service,
+        single_router_reboot_service=single_router_reboot_service,
+        manual_reboot_manager=manual_reboot_manager,
     )
 
     return app

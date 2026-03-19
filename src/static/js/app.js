@@ -1,5 +1,7 @@
 let currentExecutionId = null;
 let pollingIntervalId = null;
+let manualRebootPollingIntervalId = null;
+let currentManualRebootIp = null;
 
 const digiUserInput = document.getElementById("digiUser");
 const digiPasswordInput = document.getElementById("digiPassword");
@@ -94,12 +96,23 @@ function renderLiveProgress(jobData) {
   if (jobData.current_router_ip) {
     routerParts.push(jobData.current_router_ip);
   }
+  if (jobData.router_ip && !jobData.current_router_ip) {
+    routerParts.push(jobData.router_ip);
+  }
 
   liveCurrentRouter.textContent = routerParts.length > 0 ? routerParts.join(" | ") : "-";
 
-  const processed = jobData.processed_count ?? 0;
-  const total = jobData.total_count ?? 0;
-  liveProcessedTotal.textContent = `${processed} / ${total}`;
+  if (jobData.processed_count !== undefined || jobData.total_count !== undefined) {
+    const processed = jobData.processed_count ?? 0;
+    const total = jobData.total_count ?? 0;
+    liveProcessedTotal.textContent = `${processed} / ${total}`;
+  } else if (jobData.attempt !== undefined || jobData.max_attempts !== undefined) {
+    const attempt = jobData.attempt ?? 0;
+    const maxAttempts = jobData.max_attempts ?? 0;
+    liveProcessedTotal.textContent = `${attempt} / ${maxAttempts}`;
+  } else {
+    liveProcessedTotal.textContent = "0 / 0";
+  }
 
   if (jobData.countdown_seconds !== null && jobData.countdown_seconds !== undefined) {
     const label = jobData.countdown_label ? `${jobData.countdown_label}: ` : "";
@@ -143,13 +156,26 @@ function renderStatusBadge(value, kind = "status") {
   return `<span class="table-badge ${kind}-badge ${kind}-${safeClassValue}">${rawValue}</span>`;
 }
 
+function canManualReboot(router) {
+  return router.system_status_after === "updated_no_reboot";
+}
+
+function renderRebootButton(router) {
+  if (!canManualReboot(router)) {
+    return `<button class="row-action-btn row-action-btn-disabled" disabled>Reboot</button>`;
+  }
+
+  const ip = router.ip_address ?? "";
+  return `<button class="row-action-btn row-action-btn-danger" data-action="manual-reboot" data-ip="${ip}">Reboot</button>`;
+}
+
 function renderRouters(routers) {
   tableBody.innerHTML = "";
 
   if (!routers || routers.length === 0) {
     tableBody.innerHTML = `
       <tr>
-        <td colspan="11" class="empty-row">No data available.</td>
+        <td colspan="12" class="empty-row">No data available.</td>
       </tr>
     `;
     progressText.textContent = "0 / 0";
@@ -178,6 +204,7 @@ function renderRouters(routers) {
       <td>${renderStatusBadge(router.update_result, "result")}</td>
       <td>${renderStatusBadge(router.reboot_result, "result")}</td>
       <td>${router.notes ?? "-"}</td>
+      <td>${renderRebootButton(router)}</td>
     `;
     tableBody.appendChild(row);
   }
@@ -280,6 +307,57 @@ async function pollExecutionStatus() {
   }
 }
 
+async function pollManualRebootStatus() {
+  if (!currentExecutionId || !currentManualRebootIp) {
+    stopManualRebootPolling();
+    return;
+  }
+
+  try {
+    const [jobResponse, executionResponse] = await Promise.all([
+      fetch(`/execution/${currentExecutionId}/router/${encodeURIComponent(currentManualRebootIp)}/reboot-status`),
+      fetch(`/execution/${currentExecutionId}`),
+    ]);
+
+    const executionData = await executionResponse.json();
+    renderSummary(executionData.execution);
+    renderRouters(executionData.routers);
+
+    if (!jobResponse.ok) {
+      return;
+    }
+
+    const jobData = await jobResponse.json();
+    renderLiveProgress(jobData);
+
+    if (jobData.status === "running") {
+      setStatus("Manual Reboot Running");
+      currentPhaseLabel.textContent = jobData.current_phase || "Manual Reboot Running";
+      setMessage(jobData.message || `Manual reboot running for router ${jobData.router_ip}.`);
+      return;
+    }
+
+    if (jobData.status === "completed") {
+      setStatus("Manual Reboot Completed");
+      currentPhaseLabel.textContent = "Manual Reboot Completed";
+      setMessage(jobData.message || `Manual reboot completed for router ${jobData.router_ip}.`);
+      stopManualRebootPolling();
+      return;
+    }
+
+    if (jobData.status === "failed") {
+      setStatus("Manual Reboot Failed");
+      currentPhaseLabel.textContent = "Manual Reboot Failed";
+      setMessage(jobData.message || `Manual reboot failed for router ${jobData.router_ip}.`);
+      stopManualRebootPolling();
+    }
+  } catch (error) {
+    setMessage(`Unexpected manual reboot polling error: ${error}`);
+    setStatus("Error");
+    stopManualRebootPolling();
+  }
+}
+
 function startPolling() {
   stopPolling();
   pollingIntervalId = window.setInterval(pollExecutionStatus, 3000);
@@ -290,6 +368,20 @@ function stopPolling() {
     window.clearInterval(pollingIntervalId);
     pollingIntervalId = null;
   }
+}
+
+function startManualRebootPolling(routerIp) {
+  stopManualRebootPolling();
+  currentManualRebootIp = routerIp;
+  manualRebootPollingIntervalId = window.setInterval(pollManualRebootStatus, 2000);
+}
+
+function stopManualRebootPolling() {
+  if (manualRebootPollingIntervalId !== null) {
+    window.clearInterval(manualRebootPollingIntervalId);
+    manualRebootPollingIntervalId = null;
+  }
+  currentManualRebootIp = null;
 }
 
 validateBtn.addEventListener("click", async () => {
@@ -320,6 +412,7 @@ validateBtn.addEventListener("click", async () => {
     currentPhaseLabel.textContent = "Preparation / Validation";
     setPausedControls(false);
     stopPolling();
+    stopManualRebootPolling();
     renderLiveProgress(null);
 
     const response = await fetch("/validate", {
@@ -546,6 +639,86 @@ refreshBtn.addEventListener("click", async () => {
     setStatus("Refreshed");
   } catch (error) {
     setMessage(`Unexpected error during refresh: ${error}`);
+    setStatus("Error");
+  }
+});
+
+tableBody.addEventListener("click", async (event) => {
+  const target = event.target;
+
+  if (!(target instanceof HTMLElement)) {
+    return;
+  }
+
+  if (target.dataset.action !== "manual-reboot") {
+    return;
+  }
+
+  const ipAddress = target.dataset.ip;
+  if (!ipAddress || !currentExecutionId) {
+    setMessage("Router reboot action is missing execution or IP information.");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Are you sure you want to reboot router ${ipAddress}? This action is intended for business-approved manual reboot.`
+  );
+
+  if (!confirmed) {
+    return;
+  }
+
+  const digiUser = digiUserInput.value.trim();
+  const digiPassword = digiPasswordInput.value;
+
+  if (!validateCredentialPair(digiUser, digiPassword)) {
+    return;
+  }
+
+  try {
+    setStatus("Manual Reboot Starting");
+    currentPhaseLabel.textContent = "Single Router Reboot";
+    setMessage(`Manual reboot started for router ${ipAddress}.`);
+    renderLiveProgress({
+      current_phase: "Starting manual reboot",
+      router_ip: ipAddress,
+      attempt: 0,
+      max_attempts: 0,
+      countdown_seconds: null,
+      countdown_label: null
+    });
+
+    const response = await fetch(
+      `/execution/${currentExecutionId}/router/${encodeURIComponent(ipAddress)}/reboot`,
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          digi_user: digiUser,
+          digi_pass: digiPassword,
+        }),
+      }
+    );
+
+    const data = await response.json();
+
+    renderSummary(data.execution);
+    renderRouters(data.routers);
+
+    if (!response.ok) {
+      setMessage(data.message || "Manual reboot failed to start.");
+      setStatus("Error");
+      return;
+    }
+
+    setMessage(data.message || `Manual reboot started in background for router ${ipAddress}.`);
+    setStatus("Manual Reboot Running");
+    currentPhaseLabel.textContent = "Single Router Reboot";
+    startManualRebootPolling(ipAddress);
+  } catch (error) {
+    setMessage(`Unexpected error during manual reboot start: ${error}`);
     setStatus("Error");
   }
 });
