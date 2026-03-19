@@ -104,6 +104,7 @@ body {
     display: flex;
     gap: 12px;
     margin-bottom: 16px;
+    flex-wrap: wrap;
 }
 
 button {
@@ -126,6 +127,8 @@ button:hover {
 button:disabled {
     background: #475569;
     cursor: not-allowed;
+    transform: none;
+    opacity: 0.75;
 }
 
 /* ================= EXECUTION INFO ================= */
@@ -140,7 +143,8 @@ button:disabled {
 
 /* ================= SUMMARY CARDS ================= */
 
-.summary-grid {
+.summary-grid,
+.live-progress-grid {
     display: grid;
     grid-template-columns: repeat(4, 1fr);
     gap: 14px;
@@ -167,6 +171,11 @@ button:disabled {
     color: #f1f5f9;
 }
 
+.live-value {
+    font-size: 20px;
+    word-break: break-word;
+}
+
 /* ================= MESSAGES ================= */
 
 .messages-box {
@@ -187,7 +196,7 @@ button:disabled {
 table {
     width: 100%;
     border-collapse: collapse;
-    min-width: 1300px;
+    min-width: 1400px;
 }
 
 thead {
@@ -296,9 +305,9 @@ tbody tr:hover {
 }
 
 .status-rebooting {
-    background: rgba(168, 85, 247, 0.14);
-    color: #d8b4fe;
-    border-color: rgba(168, 85, 247, 0.35);
+    background: rgba(249, 115, 22, 0.18);
+    color: #fdba74;
+    border-color: rgba(249, 115, 22, 0.45);
 }
 
 .status-reboot-timeout {
@@ -375,10 +384,53 @@ tbody tr:hover {
     border-color: #334155;
 }
 
+/* ================= ROW ACTION BUTTONS ================= */
+
+.row-action-btn {
+    min-width: 110px;
+    padding: 10px 14px;
+    border-radius: 12px;
+    border: none;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.05s ease, opacity 0.2s ease;
+}
+
+.row-action-btn:hover {
+    opacity: 0.95;
+    transform: translateY(-1px);
+}
+
+.row-action-btn-danger {
+    background: linear-gradient(180deg, #ef4444 0%, #dc2626 100%);
+    color: #ffffff;
+    box-shadow: 0 0 0 1px rgba(239, 68, 68, 0.25);
+}
+
+.row-action-btn-danger:hover {
+    background: linear-gradient(180deg, #f87171 0%, #dc2626 100%);
+}
+
+.row-action-btn-disabled {
+    background: #475569;
+    color: #cbd5e1;
+    cursor: not-allowed;
+    opacity: 0.7;
+    border: none;
+    box-shadow: none;
+}
+
+.row-action-btn-disabled:hover {
+    transform: none;
+    opacity: 0.7;
+}
+
 /* ================= RESPONSIVE ================= */
 
 @media (max-width: 1200px) {
     .summary-grid,
+    .live-progress-grid,
     .execution-info {
         grid-template-columns: 1fr;
     }

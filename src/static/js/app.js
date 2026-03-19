@@ -161,6 +161,10 @@ function canManualReboot(router) {
 }
 
 function renderRebootButton(router) {
+  if (router.system_status_after === "rebooting") {
+    return `<button class="row-action-btn row-action-btn-disabled" disabled>Rebooting...</button>`;
+  }
+
   if (!canManualReboot(router)) {
     return `<button class="row-action-btn row-action-btn-disabled" disabled>Reboot</button>`;
   }
@@ -667,6 +671,12 @@ tableBody.addEventListener("click", async (event) => {
   if (!confirmed) {
     return;
   }
+
+  // deshabilitar inmediatamente el botón clickeado
+  target.setAttribute("disabled", "true");
+  target.classList.remove("row-action-btn-danger");
+  target.classList.add("row-action-btn-disabled");
+  target.textContent = "Rebooting...";
 
   const digiUser = digiUserInput.value.trim();
   const digiPassword = digiPasswordInput.value;

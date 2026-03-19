@@ -60,6 +60,17 @@ class SingleRouterRebootService:
                 ),
             }
 
+        # Estado inmediato en DB: reboot en progreso
+        self._audit.update_router_execution_result(
+            execution_id=execution_id,
+            ip_address=ip_address,
+            connection_status_after="connected",
+            system_status_after="rebooting",
+            update_result="success",
+            reboot_result="pending",
+            notes="Manual reboot started. Waiting for reboot cycle to complete.",
+        )
+
         if progress_callback:
             progress_callback(
                 current_phase="Sending manual reboot",
